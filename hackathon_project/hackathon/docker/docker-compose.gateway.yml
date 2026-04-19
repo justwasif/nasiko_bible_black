@@ -30,10 +30,10 @@ services:
       - gateway-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
-      interval: 30s
+      interval: 15s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 10
+      start_period: 300s
     restart: unless-stopped
 
   postgres:

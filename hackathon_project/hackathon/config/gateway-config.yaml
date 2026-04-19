@@ -81,7 +81,6 @@ model_list:
 # CHANGE THIS ONE LINE to switch all agents to a different provider.
 # No agent code changes needed. This is the core value of Track 2.
 router_settings:
-  default_model: gemini-flash       # ← swap to gpt-4o / claude-3-5-sonnet / grok-beta
   routing_strategy: simple-shuffle
   enable_pre_call_checks: true
   timeout: 60
@@ -109,17 +108,5 @@ general_settings:
 
 # ─── Observability (OpenTelemetry → Arize Phoenix) ───────────────────────────
 litellm_settings:
-  success_callback: ["otel"]
-  failure_callback: ["otel"]
-  service_callback: ["otel"]
-  redact_messages_in_logs: false   # keep visible for demo tracing
+  redact_messages_in_logs: false
   telemetry: false
-
-# ─── Caching ─────────────────────────────────────────────────────────────────
-cache: true
-cache_params:
-  type: redis
-  host: "os.environ/REDIS_HOST"
-  port: "os.environ/REDIS_PORT"
-  password: "os.environ/REDIS_PASSWORD"
-  ttl: 3600

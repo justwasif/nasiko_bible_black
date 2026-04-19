@@ -90,11 +90,13 @@ gateway-status:
 
 start-nasiko:
 	@echo "Starting LiteLLM gateway + Nasiko agent..."
-	@if [ ! -f $(ENV_FILE) ]; then echo "ERROR: $(ENV_FILE) not found. Run: cp env.gateway.example .env.gateway"; exit 1; fi
+	@if [ ! -f $(ENV_FILE) ]; then echo "ERROR: $(ENV_FILE) not found"; exit 1; fi
 	docker compose --env-file $(ENV_FILE) -f $(LOCAL_COMPOSE) up -d --build
+	@echo "Waiting 45s for gateway to boot..."
+	@sleep 45
 	@echo ""
+	@curl -sf http://localhost:4000/health > /dev/null && echo "✅ Gateway up" || echo "⚠️  Gateway still starting — wait 30s more"
 	@echo "Gateway: http://localhost:4000  |  Agent: http://localhost:8010"
-	@echo "Tip: run 'make generate-key team=demo' to create your virtual key"
 
 stop-nasiko:
 	@echo "Stopping all Nasiko services..."
