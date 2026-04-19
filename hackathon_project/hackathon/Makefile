@@ -1,220 +1,202 @@
-# LLM Gateway Integration - Makefile
-# Provides commands to manage the LLM Gateway and related services
+# LLM Gateway Integration — Makefile
+# Track 2: Platform-Managed LLM Gateway (Nasiko Hackathon)
 
 .PHONY: help start-gateway stop-gateway restart-gateway gateway-logs gateway-status
-.PHONY: start-nasiko stop-nasiko init-gateway generate-key
-.PHONY: test-agent-legacy test-agent-gateway test-integration
-.PHONY: k8s-deploy k8s-delete k8s-logs
-.PHONY: docs clean
+.PHONY: start-nasiko stop-nasiko build-agent agent-logs
+.PHONY: init-gateway generate-key list-keys delete-key
+.PHONY: test-agent-legacy test-agent-gateway integration-test
+.PHONY: k8s-deploy k8s-delete k8s-logs clean shell-gateway db-shell
 
-# Configuration
-GATEWAY_COMPOSE=docker/docker-compose.gateway.yml
-K8S_DIR=k8s
-AGENT_DIR=agents
-SCRIPTS_DIR=scripts
+GATEWAY_COMPOSE  = docker/docker-compose.gateway.yml
+LOCAL_COMPOSE    = ../docker-compose.local.yml
+ENV_FILE         = .env.gateway
+AGENT_DIR        = agents
+SCRIPTS_DIR      = scripts
 
-# Default target
 .DEFAULT_GOAL := help
 
-## ============================================
-## Help
-## ============================================
+# ── Help ──────────────────────────────────────────────────────────────────────
 
-help: ## Show this help message
-	@echo "LLM Gateway - Available Commands:"
+help:
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo "NasikoGateway — LLM Router (Track 2)"
+	@echo "======================================"
 	@echo ""
-	@echo "Quick Start:"
-	@echo "  1. Copy .env.gateway.example to .env.gateway and fill in values"
-	@echo "  2. Run: make init-gateway"
-	@echo "  3. Run: make start-gateway"
-	@echo "  4. Run: make generate-key team=myteam"
-	@echo "  5. Run: make test-agent-gateway"
+	@echo "  Quick start (first time):"
+	@echo "    1. cp env.gateway.example .env.gateway"
+	@echo "    2. Edit .env.gateway with your API keys"
+	@echo "    3. make start-nasiko"
+	@echo "    4. make generate-key team=demo"
+	@echo "    5. Add GATEWAY_VIRTUAL_KEY to .env.gateway"
+	@echo "    6. make stop-nasiko && make start-nasiko"
+	@echo "    7. make integration-test"
+	@echo ""
+	@echo "  Gateway only:"
+	@echo "    make start-gateway      Start LiteLLM + Postgres + Redis"
+	@echo "    make stop-gateway       Stop gateway stack"
+	@echo "    make restart-gateway    Restart gateway"
+	@echo "    make gateway-logs       Tail gateway logs"
+	@echo "    make gateway-status     Health check"
+	@echo ""
+	@echo "  Full stack (gateway + agent):"
+	@echo "    make start-nasiko       Start everything"
+	@echo "    make stop-nasiko        Stop everything"
+	@echo "    make build-agent        Rebuild agent image"
+	@echo "    make agent-logs         Tail agent logs"
+	@echo ""
+	@echo "  Virtual keys:"
+	@echo "    make generate-key team=<name>   Generate a virtual key"
+	@echo "    make list-keys                  List all keys"
+	@echo "    make delete-key key=<key>       Delete a key"
+	@echo ""
+	@echo "  Testing:"
+	@echo "    make integration-test   Run end-to-end tests"
+	@echo "    make test-agent-gateway Test gateway agent script"
+	@echo "    make test-agent-legacy  Test legacy agent script"
+	@echo ""
+	@echo "  Cleanup:"
+	@echo "    make clean              Remove all containers and volumes"
+	@echo ""
 
-## ============================================
-## Gateway Management
-## ============================================
+# ── Gateway only ──────────────────────────────────────────────────────────────
 
-start-gateway: ## Start the LLM Gateway and dependencies
-	@echo "========================================"
-	@echo "Starting LLM Gateway..."
-	@echo "========================================"
-	docker-compose -f $(GATEWAY_COMPOSE) up -d
+start-gateway:
+	@echo "Starting LiteLLM gateway stack..."
+	@if [ ! -f $(ENV_FILE) ]; then echo "ERROR: $(ENV_FILE) not found. Run: cp env.gateway.example .env.gateway"; exit 1; fi
+	docker compose --env-file $(ENV_FILE) -f $(GATEWAY_COMPOSE) up -d
+	@echo "Waiting for gateway to be healthy..."
+	@sleep 20
 	@echo ""
-	@echo "Waiting for services to be healthy..."
-	@sleep 15
-	@echo ""
-	@echo "Gateway Status:"
-	@docker-compose -f $(GATEWAY_COMPOSE) ps
-	@echo ""
-	@echo "Gateway URL: http://localhost:4000"
-	@echo "Health Check: http://localhost:4000/health"
-	@echo ""
-	@echo "To generate virtual keys, run: make generate-key team=<name>"
+	@echo "Gateway: http://localhost:4000"
+	@echo "Admin UI: http://localhost:4000/ui"
 
-stop-gateway: ## Stop the LLM Gateway and dependencies
-	@echo "Stopping LLM Gateway..."
-	docker-compose -f $(GATEWAY_COMPOSE) down
-	@echo "Gateway stopped."
+stop-gateway:
+	@echo "Stopping gateway stack..."
+	docker compose -f $(GATEWAY_COMPOSE) down
 
-restart-gateway: stop-gateway start-gateway ## Restart the LLM Gateway
+restart-gateway: stop-gateway start-gateway
 
-gateway-logs: ## View gateway logs
-	docker-compose -f $(GATEWAY_COMPOSE) logs -f litellm-gateway
+gateway-logs:
+	docker compose -f $(GATEWAY_COMPOSE) logs -f litellm-gateway
 
-gateway-status: ## Check gateway status
-	@echo "Gateway Containers:"
-	@docker-compose -f $(GATEWAY_COMPOSE) ps
+gateway-status:
+	@echo "--- Containers ---"
+	@docker compose -f $(GATEWAY_COMPOSE) ps
 	@echo ""
-	@echo "Health Check:"
-	@curl -s http://localhost:4000/health | jq . || echo "Gateway not responding"
+	@echo "--- Health ---"
+	@curl -sf http://localhost:4000/health | python3 -m json.tool || echo "Gateway not responding"
 
-## ============================================
-## Initialization
-## ============================================
+# ── Full Nasiko stack (gateway + agent) ───────────────────────────────────────
 
-init-gateway: ## Initialize gateway (first time setup)
-	@echo "========================================"
-	@echo "Initializing LLM Gateway..."
-	@echo "========================================"
+start-nasiko:
+	@echo "Starting LiteLLM gateway + Nasiko agent..."
+	@if [ ! -f $(ENV_FILE) ]; then echo "ERROR: $(ENV_FILE) not found. Run: cp env.gateway.example .env.gateway"; exit 1; fi
+	docker compose --env-file $(ENV_FILE) -f $(LOCAL_COMPOSE) up -d --build
 	@echo ""
-	@if [ ! -f .env.gateway ]; then \
-		echo "Creating .env.gateway from template..."; \
-		cp .env.gateway.example .env.gateway; \
-		echo "Please edit .env.gateway with your actual API keys"; \
-		echo "Then run: make init-gateway again"; \
-		exit 1; \
-	fi
-	@echo "Environment file found."
-	@echo ""
-	@echo "Starting services..."
-	$(MAKE) start-gateway
-	@echo ""
-	@echo "========================================"
-	@echo "Gateway initialized successfully!"
-	@echo "========================================"
-	@echo ""
-	@echo "Next steps:"
-	@echo "  1. Generate virtual keys: make generate-key team=<name>"
-	@echo "  2. Update agent environment variables"
-	@echo "  3. Test with: make test-agent-gateway"
+	@echo "Gateway: http://localhost:4000  |  Agent: http://localhost:8010"
+	@echo "Tip: run 'make generate-key team=demo' to create your virtual key"
 
-## ============================================
-## Virtual Key Management
-## ============================================
+stop-nasiko:
+	@echo "Stopping all Nasiko services..."
+	docker compose -f $(LOCAL_COMPOSE) down
 
-generate-key: ## Generate a virtual key (usage: make generate-key team=<name> models="gpt-4,gpt-3.5-turbo")
-	@if [ -z "$(team)" ]; then \
-		echo "Error: team parameter required"; \
-		echo "Usage: make generate-key team=<name> models='gpt-4,gpt-3.5-turbo'"; \
-		exit 1; \
-	fi
+build-agent:
+	@echo "Rebuilding nasiko-agent image..."
+	docker compose -f $(LOCAL_COMPOSE) build nasiko-agent
+
+agent-logs:
+	docker compose -f $(LOCAL_COMPOSE) logs -f nasiko-agent
+
+# ── Virtual keys ──────────────────────────────────────────────────────────────
+
+generate-key:
+	@if [ -z "$(team)" ]; then echo "Usage: make generate-key team=<name>"; exit 1; fi
 	@echo "Generating virtual key for team: $(team)"
 	@TEAM="$(team)" \
-	MODELS="$(or $(models),gpt-4,gpt-3.5-turbo)" \
-	BUDGET="$(or $(budget),100.0)" \
-	$(SCRIPTS_DIR)/generate-virtual-key.sh
+	 MODELS="$(or $(models),gemini-flash,groq-llama3,gpt-3.5-turbo)" \
+	 BUDGET="$(or $(budget),100.0)" \
+	 bash $(SCRIPTS_DIR)/generate-virtual-key.sh
 
-list-keys: ## List all virtual keys
-	@echo "Listing virtual keys..."
-	@curl -s http://localhost:4000/key/list \
-		-H "Authorization: Bearer $$LITELLM_MASTER_KEY" | jq .
+list-keys:
+	@MASTER=$$(grep LITELLM_MASTER_KEY $(ENV_FILE) 2>/dev/null | cut -d= -f2); \
+	curl -sf http://localhost:4000/key/list \
+	     -H "Authorization: Bearer $$MASTER" | python3 -m json.tool || echo "Could not list keys"
 
-delete-key: ## Delete a virtual key (usage: make delete-key key=<key>)
-	@if [ -z "$(key)" ]; then \
-		echo "Error: key parameter required"; \
-		exit 1; \
-	fi
-	@echo "Deleting virtual key: $(key)"
-	@curl -s -X POST http://localhost:4000/key/delete \
-		-H "Authorization: Bearer $$LITELLM_MASTER_KEY" \
-		-H "Content-Type: application/json" \
-		-d '{"key": "$(key)"}' | jq .
+delete-key:
+	@if [ -z "$(key)" ]; then echo "Usage: make delete-key key=<key>"; exit 1; fi
+	@MASTER=$$(grep LITELLM_MASTER_KEY $(ENV_FILE) 2>/dev/null | cut -d= -f2); \
+	curl -sf -X POST http://localhost:4000/key/delete \
+	     -H "Authorization: Bearer $$MASTER" \
+	     -H "Content-Type: application/json" \
+	     -d '{"key": "$(key)"}' | python3 -m json.tool
 
-## ============================================
-## Orchestrator Integration (Nasiko)
-## ============================================
+# ── Testing ───────────────────────────────────────────────────────────────────
 
-start-nasiko: start-gateway ## Start Nasiko orchestrator with LLM Gateway
-	@echo "Starting Nasiko orchestrator with LLM Gateway..."
-	@echo "Gateway is running at: http://localhost:4000"
-	# Add your existing Nasiko startup commands here
-	# Example: docker-compose -f docker-compose.nasiko.yml up -d
-	@echo "Nasiko started successfully!"
+integration-test:
+	@echo "=== Integration Test (Track 2 Acceptance Criteria) ==="
+	@PASS=true; \
+	\
+	printf "[1/4] Gateway health... "; \
+	STATUS=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/health); \
+	if [ "$$STATUS" = "200" ]; then echo "✓"; else echo "✗ HTTP $$STATUS"; PASS=false; fi; \
+	\
+	printf "[2/4] Agent health...   "; \
+	STATUS=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8010/health); \
+	if [ "$$STATUS" = "200" ]; then echo "✓"; else echo "✗ HTTP $$STATUS"; PASS=false; fi; \
+	\
+	printf "[3/4] Generating key... "; \
+	MASTER=$$(grep LITELLM_MASTER_KEY $(ENV_FILE) 2>/dev/null | cut -d= -f2); \
+	VKEY=$$(curl -s -X POST http://localhost:4000/key/generate \
+	        -H "Authorization: Bearer $$MASTER" \
+	        -H "Content-Type: application/json" \
+	        -d '{"models":["gemini-flash","groq-llama3"],"duration":"1h"}' \
+	        | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null); \
+	if [ -n "$$VKEY" ]; then echo "✓  $${VKEY:0:15}..."; else echo "✗ Failed"; PASS=false; fi; \
+	\
+	printf "[4/4] Agent chat...     "; \
+	RESP=$$(curl -s -X POST http://localhost:8010/chat \
+	        -H "Content-Type: application/json" \
+	        -d '{"message":"Say hello in exactly one word."}'); \
+	if echo "$$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('response') else 1)" 2>/dev/null; \
+	then echo "✓"; else echo "✗  $$RESP"; PASS=false; fi; \
+	\
+	echo ""; \
+	if [ "$$PASS" = "true" ]; then echo "✅  ALL TESTS PASSED"; else echo "❌  SOME TESTS FAILED"; exit 1; fi
 
-stop-nasiko: ## Stop Nasiko orchestrator
-	@echo "Stopping Nasiko orchestrator..."
-	# Add your existing Nasiko stop commands here
-	$(MAKE) stop-gateway
-	@echo "Nasiko stopped."
+test-agent-gateway:
+	@echo "Testing gateway agent script..."
+	cd $(AGENT_DIR) && python3 sample-agent-gateway.py
 
-## ============================================
-## Testing
-## ============================================
+test-agent-legacy:
+	@echo "Testing legacy agent script..."
+	cd $(AGENT_DIR) && python3 sample-agent-legacy.py
 
-test-agent-legacy: ## Test legacy agent with direct provider keys
-	@echo "Testing legacy agent..."
-	cd $(AGENT_DIR) && python sample-agent-legacy.py
+# ── Kubernetes ────────────────────────────────────────────────────────────────
 
-test-agent-gateway: ## Test agent with gateway virtual key
-	@echo "Testing gateway agent..."
-	cd $(AGENT_DIR) && python sample-agent-gateway.py
-
-test-integration: ## Run integration tests
-	@echo "Running integration tests..."
-	python -m pytest tests/ -v
-
-test-load: ## Run load tests
-	@echo "Running load tests..."
-	python tests/test_load.py
-
-## ============================================
-## Kubernetes Deployment
-## ============================================
-
-k8s-deploy: ## Deploy to Kubernetes
-	@echo "Deploying to Kubernetes..."
-	kubectl apply -f $(K8S_DIR)/secrets.yaml
-	kubectl apply -f $(K8S_DIR)/gateway-deployment.yaml
-	@echo "Deployment complete."
+k8s-deploy:
+	kubectl apply -f k8s/secrets.yaml
+	kubectl apply -f k8s/gateway-deployment.yaml
 	kubectl get pods -l app=litellm-gateway
 
-k8s-delete: ## Delete Kubernetes deployment
-	@echo "Deleting Kubernetes deployment..."
-	kubectl delete -f $(K8S_DIR)/gateway-deployment.yaml
-	kubectl delete -f $(K8S_DIR)/secrets.yaml
+k8s-delete:
+	kubectl delete -f k8s/gateway-deployment.yaml
+	kubectl delete -f k8s/secrets.yaml
 
-k8s-logs: ## View Kubernetes logs
+k8s-logs:
 	kubectl logs -l app=litellm-gateway --tail=100 -f
 
-## ============================================
-## Documentation
-## ============================================
+# ── Cleanup ───────────────────────────────────────────────────────────────────
 
-docs: ## Generate/update documentation
-	@echo "Documentation is available in:"
-	@echo "  - docs/ARCHITECTURE.md"
-	@echo "  - docs/MIGRATION.md"
-	@echo "  - docs/API.md"
-	@echo "  - docs/TROUBLESHOOTING.md"
+clean:
+	@echo "Removing all containers and volumes..."
+	-docker compose -f $(LOCAL_COMPOSE) down -v 2>/dev/null
+	-docker compose -f $(GATEWAY_COMPOSE) down -v 2>/dev/null
+	@echo "Done."
 
-## ============================================
-## Cleanup
-## ============================================
+# ── Dev helpers ───────────────────────────────────────────────────────────────
 
-clean: ## Clean up all resources
-	@echo "Cleaning up..."
-	docker-compose -f $(GATEWAY_COMPOSE) down -v
-	docker system prune -f
-	@echo "Cleanup complete."
+shell-gateway:
+	docker compose -f $(GATEWAY_COMPOSE) exec litellm-gateway /bin/sh
 
-## ============================================
-## Development Helpers
-## ============================================
-
-shell-gateway: ## Open shell in gateway container
-	docker-compose -f $(GATEWAY_COMPOSE) exec litellm-gateway /bin/sh
-
-db-shell: ## Open PostgreSQL shell
-	docker-compose -f $(GATEWAY_COMPOSE) exec postgres psql -U litellm -d litellm
+db-shell:
+	docker compose -f $(GATEWAY_COMPOSE) exec postgres psql -U litellm -d litellm

@@ -410,7 +410,8 @@
           <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
           <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
           <option value="claude-3-haiku">claude-3-haiku</option>
-          <option value="grok-beta">grok-beta</option>
+          <option value="groq-llama3">groq-llama3</option>
+          <option value="groq-mixtral">groq-mixtral</option>
         </select>
         <div class="chat-input-wrap">
           <input class="chat-input" id="chat-input" placeholder="Ask anything — routes through gateway, no hardcoded key..." />
@@ -476,7 +477,7 @@
         </div>
         <div class="check-item">
           <div class="check-icon">✅</div>
-          <div class="check-text"><b>Multi-provider</b>: Gemini · GPT-4o · Claude · Grok</div>
+          <div class="check-text"><b>Multi-provider</b>: Gemini · GPT-4o · Claude · Groq</div>
         </div>
       </div>
     </div>
@@ -500,7 +501,7 @@
       <div class="trace-line">
         <span class="trace-time">--:--:--</span>
         <span class="trace-level info">INFO</span>
-        <span class="trace-msg">Providers loaded: Gemini, GPT-4o, Claude, Grok · default: gemini-flash</span>
+        <span class="trace-msg">Providers loaded: Gemini, GPT-4o, Claude, Groq · default: gemini-flash</span>
       </div>
     </div>
   </div>
@@ -518,7 +519,8 @@ const providers = [
   { id: 'gpt-3.5-turbo',   name: 'OpenAI',         model: 'openai/gpt-3.5-turbo',             emoji: '🔵', tag: 'PAID'                        },
   { id: 'claude-3-5-sonnet',name: 'Anthropic',      model: 'anthropic/claude-3-5-sonnet',      emoji: '🟠', tag: 'PAID'                        },
   { id: 'claude-3-haiku',  name: 'Anthropic',      model: 'anthropic/claude-3-haiku',         emoji: '🟠', tag: 'PAID'                        },
-  { id: 'grok-beta',       name: 'xAI Grok',       model: 'xai/grok-beta',                    emoji: '⚫', tag: 'PAID'                        },
+  { id: 'groq-llama3', name: 'Groq', model: 'groq/llama3-8b-8192', emoji: '⚡', tag: 'FREE TIER' },
+  { id: 'groq-mixtral', name: 'Groq', model: 'groq/mixtral-8x7b-32768', emoji: '⚡', tag: 'FREE TIER' },
 ];
 
 let activeProvider = providers[0];
@@ -654,7 +656,7 @@ async function sendMessage() {
     const providerName = modelUsed.includes('gemini') ? 'Google Gemini' :
                          modelUsed.includes('gpt') ? 'OpenAI' :
                          modelUsed.includes('claude') ? 'Anthropic' :
-                         modelUsed.includes('grok') ? 'xAI Grok' : 'Gateway';
+                         modelUsed.includes('groq') ? 'Groq' : 'Gateway';
 
     addMessage('assistant', content, {
       provider: providerName,

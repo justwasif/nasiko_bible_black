@@ -62,20 +62,20 @@ model_list:
       rpm: 1000
       tpm: 1000000
 
-  # ─── xAI Grok ──────────────────────────────────────────────────────────────
-  - model_name: grok-beta
+  # Groq (very fast, cheap inference)
+  - model_name: groq-llama3
     litellm_params:
-      model: xai/grok-beta
-      api_key: "os.environ/XAI_API_KEY"
-      rpm: 60
-      tpm: 131072
+      model: groq/llama3-8b-8192
+      api_key: "os.environ/GROQ_API_KEY"
+      rpm: 30
+      tpm: 14400
 
-  - model_name: grok-2
+  - model_name: groq-mixtral
     litellm_params:
-      model: xai/grok-2
-      api_key: "os.environ/XAI_API_KEY"
-      rpm: 60
-      tpm: 131072
+      model: groq/mixtral-8x7b-32768
+      api_key: "os.environ/GROQ_API_KEY"
+      rpm: 30
+      tpm: 14400
 
 # ─── Router: which model agents get when they don't specify ──────────────────
 # CHANGE THIS ONE LINE to switch all agents to a different provider.
