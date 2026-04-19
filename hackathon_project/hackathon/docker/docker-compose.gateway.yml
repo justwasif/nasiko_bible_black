@@ -7,23 +7,17 @@ services:
     ports:
       - "4000:4000"
     environment:
-      # Provider API Keys (stored only in gateway)
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      
-      # Gateway Configuration
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
       - DATABASE_URL=${DATABASE_URL:-postgresql://litellm:litellm@postgres:5432/litellm}
-      
-      # Redis Configuration (optional)
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      
-      # OpenTelemetry (optional)
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-litellm-gateway}
-      
     volumes:
       - ../config/gateway-config.yaml:/app/config.yaml
     command: --config /app/config.yaml --port 4000
@@ -36,22 +30,12 @@ services:
       - gateway-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
-      interval: 30s
+      interval: 15s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 10
+      start_period: 300s
     restart: unless-stopped
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
-  # PostgreSQL for usage tracking and key management
   postgres:
     image: postgres:15-alpine
     container_name: litellm-postgres
@@ -70,7 +54,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Redis for caching
   redis:
     image: redis:7-alpine
     container_name: litellm-redis

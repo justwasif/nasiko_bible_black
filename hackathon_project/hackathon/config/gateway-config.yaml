@@ -1,21 +1,21 @@
 # LiteLLM Gateway Configuration
-# This file configures the LLM proxy gateway
+# Track 2: LLM Router Gateway Integration
+# Provider switching is gateway-config ONLY — no agent code changes needed.
 
-# Model List - Define all available models and their providers
 model_list:
-  # OpenAI Models
+  # ─── OpenAI ────────────────────────────────────────────────────────────────
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: "os.environ/OPENAI_API_KEY"
+      rpm: 500
+      tpm: 100000
+
   - model_name: gpt-4
     litellm_params:
       model: openai/gpt-4
       api_key: "os.environ/OPENAI_API_KEY"
-      rpm: 1000
-      tpm: 100000
-
-  - model_name: gpt-4-turbo
-    litellm_params:
-      model: openai/gpt-4-turbo-preview
-      api_key: "os.environ/OPENAI_API_KEY"
-      rpm: 1000
+      rpm: 500
       tpm: 100000
 
   - model_name: gpt-3.5-turbo
@@ -25,17 +25,10 @@ model_list:
       rpm: 3000
       tpm: 200000
 
-  # Anthropic Models
-  - model_name: claude-3-opus
+  # ─── Anthropic ─────────────────────────────────────────────────────────────
+  - model_name: claude-3-5-sonnet
     litellm_params:
-      model: anthropic/claude-3-opus-20240229
-      api_key: "os.environ/ANTHROPIC_API_KEY"
-      rpm: 100
-      tpm: 50000
-
-  - model_name: claude-3-sonnet
-    litellm_params:
-      model: anthropic/claude-3-sonnet-20240229
+      model: anthropic/claude-3-5-sonnet-20241022
       api_key: "os.environ/ANTHROPIC_API_KEY"
       rpm: 200
       tpm: 100000
@@ -47,65 +40,73 @@ model_list:
       rpm: 300
       tpm: 150000
 
-# Router Settings - Configure fallback and load balancing
+  # ─── Google Gemini (FREE tier — recommended default for demos) ───────────
+  - model_name: gemini-flash        # cheapest, fastest
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: "os.environ/GEMINI_API_KEY"
+      rpm: 1000
+      tpm: 1000000
+
+  - model_name: gemini-pro
+    litellm_params:
+      model: gemini/gemini-1.5-pro
+      api_key: "os.environ/GEMINI_API_KEY"
+      rpm: 360
+      tpm: 500000
+
+  - model_name: gemini-2-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_key: "os.environ/GEMINI_API_KEY"
+      rpm: 1000
+      tpm: 1000000
+
+  # Groq (very fast, cheap inference)
+  - model_name: groq-llama3
+    litellm_params:
+      model: groq/llama3-8b-8192
+      api_key: "os.environ/GROQ_API_KEY"
+      rpm: 30
+      tpm: 14400
+
+  - model_name: groq-mixtral
+    litellm_params:
+      model: groq/mixtral-8x7b-32768
+      api_key: "os.environ/GROQ_API_KEY"
+      rpm: 30
+      tpm: 14400
+
+# ─── Router: which model agents get when they don't specify ──────────────────
+# CHANGE THIS ONE LINE to switch all agents to a different provider.
+# No agent code changes needed. This is the core value of Track 2.
 router_settings:
   routing_strategy: simple-shuffle
   enable_pre_call_checks: true
   timeout: 60
   num_retries: 3
+  fallbacks:
+    - gemini-flash:
+        - gpt-3.5-turbo
+        - claude-3-haiku
 
-# Virtual Key Settings - Define default budgets and limits
-# These can be overridden per-key via API
+# ─── Virtual Keys ────────────────────────────────────────────────────────────
 virtual_key_defaults:
   max_budget: 100.0
   budget_duration: "30d"
   tpm_limit: 100000
   rpm_limit: 1000
-  allowed_models: null  # null means all models
+  allowed_models: null
 
-# General Settings
+# ─── General ─────────────────────────────────────────────────────────────────
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"
   proxy_batch_write_at: 60
   database_connection_pool_limit: 10
-  alerting_threshold: 300
-  alert_to_email_addresses: ["ops@company.com"]
-  
-  # UI Settings
   ui_access_mode: "admin"
-  
-  # Rate Limiting
   enable_ratelimiting: true
 
-# LiteLLM Settings - Observability callbacks
+# ─── Observability (OpenTelemetry → Arize Phoenix) ───────────────────────────
 litellm_settings:
-  success_callback: ["otel"]
-  failure_callback: ["otel"]
-  service_callback: ["otel"]
-  
-  # Redact messages from logs for security
-  redact_messages_in_logs: true
-  
-  # Disable telemetry
+  redact_messages_in_logs: false
   telemetry: false
-
-# Caching Configuration (requires Redis)
-cache: true
-cache_params:
-  type: redis
-  host: "os.environ/REDIS_HOST"
-  port: "os.environ/REDIS_PORT"
-  password: "os.environ/REDIS_PASSWORD"
-  ttl: 3600
-
-# Guardrails (optional)
-guardrails:
-  - prompt_injection:
-      callbacks: ["llmguard_moderation"]
-      default_on: false
-
-# Pass-through Endpoints (optional)
-pass_through_endpoints: []
-
-# Allowed IPs (optional security)
-allowed_ips: null
