@@ -86,8 +86,6 @@ gateway-status:
 	@echo "--- Health ---"
 	@curl -sf http://localhost:4000/health | python3 -m json.tool || echo "Gateway not responding"
 
-# ── Full Nasiko stack (gateway + agent) ───────────────────────────────────────
-
 start-nasiko:
 	@echo "Starting LiteLLM gateway + Nasiko agent..."
 	@if [ ! -f $(ENV_FILE) ]; then echo "ERROR: $(ENV_FILE) not found"; exit 1; fi
@@ -95,7 +93,7 @@ start-nasiko:
 	@echo "Waiting 45s for gateway to boot..."
 	@sleep 45
 	@echo ""
-	@curl -sf http://localhost:4000/health > /dev/null && echo "✅ Gateway up" || echo "⚠️  Gateway still starting — wait 30s more"
+	@curl -sf http://localhost:4000/health > /dev/null && echo "Gateway up" || echo "Gateway still starting — wait 30s more"
 	@echo "Gateway: http://localhost:4000  |  Agent: http://localhost:8010"
 
 stop-nasiko:

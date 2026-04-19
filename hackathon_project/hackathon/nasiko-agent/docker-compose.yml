@@ -1,8 +1,4 @@
 version: '3.8'
-
-# Nasiko Agent Structure Contract — this file must exist at top level
-# alongside Dockerfile and src/main.py
-
 services:
   gateway-demo-agent:
     build: .

@@ -1,7 +1,3 @@
-# LiteLLM Gateway Configuration
-# Track 2: LLM Router Gateway Integration
-# Provider switching is gateway-config ONLY — no agent code changes needed.
-
 model_list:
   # ─── OpenAI ────────────────────────────────────────────────────────────────
   - model_name: gpt-4o
@@ -40,8 +36,7 @@ model_list:
       rpm: 300
       tpm: 150000
 
-  # ─── Google Gemini (FREE tier — recommended default for demos) ───────────
-  - model_name: gemini-flash        # cheapest, fastest
+  - model_name: gemini-flash
     litellm_params:
       model: gemini/gemini-1.5-flash
       api_key: "os.environ/GEMINI_API_KEY"
@@ -77,9 +72,6 @@ model_list:
       rpm: 30
       tpm: 14400
 
-# ─── Router: which model agents get when they don't specify ──────────────────
-# CHANGE THIS ONE LINE to switch all agents to a different provider.
-# No agent code changes needed. This is the core value of Track 2.
 router_settings:
   routing_strategy: simple-shuffle
   enable_pre_call_checks: true

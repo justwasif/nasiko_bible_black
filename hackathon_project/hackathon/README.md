@@ -1,328 +1,270 @@
-# LLM Router Gateway Integration
+# NasikoGateway — LLM Router Gateway Integration
 
-## Track 2: Platform-Managed LLM Gateway
+> **Hackathon Track 2** — Platform-managed LLM gateway for the [Nasiko](https://github.com/Nasiko-Labs/nasiko) open-source agent orchestration platform.
 
-This project implements a platform-managed LLM gateway using LiteLLM Proxy, enabling agents to use virtual keys instead of hardcoded provider API keys.
+---
+
+## What It Does
+
+NasikoGateway introduces a **centralized LLM routing layer** powered by [LiteLLM Proxy](https://docs.litellm.ai/docs/proxy/quick_start). Instead of every agent managing its own provider API keys, agents talk to a single gateway endpoint using a **virtual key**. The gateway holds the real credentials and routes requests to whichever provider is configured — Gemini, GPT-4o, Claude, or Groq.
+
+```
+OLD (fragile, insecure)
+agent code  →  hardcoded OPENAI_API_KEY  →  OpenAI only
+
+NEW (portable, secure)
+agent code  →  GATEWAY_VIRTUAL_KEY  →  LiteLLM Gateway  →  any provider
+```
+
+Switching from Claude to Gemini to GPT-4o = **one line change in `gateway-config.yaml`, zero agent code changes.**
+
+---
 
 ## Quick Start
 
 ### Prerequisites
+- Docker + Docker Compose
+- `make`
+
+### Start Everything
+
+```bash
+# Clone and start the full Nasiko stack with gateway
+git clone https://github.com/Nasiko-Labs/nasiko
+cd nasiko
+make start-nasiko        # starts Nasiko + LiteLLM gateway + Postgres + Redis
+```
+
+### Or start just the gateway
+
+```bash
+make start-gateway       # only the LiteLLM proxy stack
+```
+
+### Generate a virtual key
+
+```bash
+make generate-key team=demo
+# → sk-litellm-v1-xxxxxxxxxxxxxxxx
+```
+
+### Run the gateway agent
+
+```bash
+export GATEWAY_VIRTUAL_KEY=sk-litellm-v1-your-key-here
+python agents/sample-agent-gateway.py
+```
+
+### Switch providers (zero code changes)
+
+Edit `config/gateway-config.yaml`:
+```yaml
+router_settings:
+  default_model: gpt-4o   # was: gemini-flash — this is the ONLY change
+```
+
+Then restart the gateway:
+```bash
+make restart-gateway
+```
+
+**The agent code is unchanged. It still calls `http://localhost:4000`.** The gateway routes to the new provider.
+
+---
+
+## Project Structure
+
+```
+hackathon_project/
+├── config/
+│   └── gateway-config.yaml        # LiteLLM multi-provider config (all providers here)
+├── docker/
+│   └── docker-compose.gateway.yml # LiteLLM + Postgres + Redis
+├── agents/
+│   ├── base_gateway_client.py     # Reusable gateway client base class
+│   ├── sample-agent-gateway.py    #New pattern — virtual key only
+│   └── sample-agent-legacy.py    # Legacy pattern — backward compatible
+├── nasiko-agent/
+│   └── src/main.py                # Nasiko-compliant FastAPI agent
+├── frontend/
+│   └── index.html                 # Live dashboard — provider switching, trace log
+└── Makefile                       # make start-gateway / generate-key / restart-gateway
+```
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Agent Code                               │
+│  GATEWAY_URL = http://localhost:4000                            │
+│  Authorization: Bearer sk-litellm-v1-xxx   (virtual key only)  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ OpenAI-compatible /chat/completions
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    LiteLLM Proxy (port 4000)                    │
+│  • Resolves virtual key → real provider key (in container env)  │
+│  • Routes to configured default_model                           │
+│  • Enforces budget / RPM / TPM limits per virtual key           │
+│  • Emits OpenTelemetry spans → Arize Phoenix                    │
+│  • Automatic fallback: gemini-flash → gpt-3.5 → claude-haiku   │
+└──────┬───────────────────────┬────────────────────┬────────────┘
+       │                       │                    │
+       ▼                       ▼                    ▼
+  Google Gemini            OpenAI                Anthropic / Groq
+  (free tier)            (GPT-4o)            (Claude / Llama3)
+```
+
+---
+
+## Key Design Decisions
+
+### Why LiteLLM over Portkey?
+
+| Criteria | LiteLLM | Portkey |
+|---|---|---|
+| Self-hosted | ✅ Full control | ⚠️ Cloud-first |
+| Open source | ✅ Apache 2.0 | ❌ Proprietary |
+| Provider support | 100+ | ~20 |
+| Virtual keys | ✅ Built-in | ✅ Built-in |
+| OpenTelemetry | ✅ Native | ✅ Native |
+| Nasiko alignment | ✅ Composable | ⚠️ External dependency |
 
-- Docker & Docker Compose
-- Make
-- Python 3.9+ (for agent development)
-
-### Installation
-
-1. **Clone and navigate to the project:**
-   ```bash
-      cd hackathon
-         ```
-
-         2. **Run the setup script:**
-            ```bash
-               ./scripts/setup-gateway.sh
-                  ```
-
-                     Or use Make:
-                        ```bash
-                           make init-gateway
-                              ```
-
-                              3. **Configure environment variables:**
-                                 ```bash
-                                    cp .env.gateway.example .env.gateway
-                                       # Edit .env.gateway with your API keys
-                                          ```
-
-                                          4. **Start the gateway:**
-                                             ```bash
-                                                make start-gateway
-                                                   ```
-
-                                                   5. **Generate a virtual key:**
-                                                      ```bash
-                                                         make generate-key team=myteam models="gpt-4,gpt-3.5-turbo"
-                                                            ```
-
-                                                            6. **Test with sample agent:**
-                                                               ```bash
-                                                                  make test-agent-gateway
-                                                                     ```
-
-                                                                     ## Project Structure
-
-                                                                     ```
-                                                                     ├── config/
-                                                                     │   └── gateway-config.yaml          # Gateway configuration
-                                                                     ├── docker/
-                                                                     │   └── docker-compose.gateway.yml   # Docker deployment
-                                                                     ├── agents/
-                                                                     │   ├── base_gateway_client.py       # Gateway client library
-                                                                     │   ├── sample-agent-gateway.py      # New pattern (virtual keys)
-                                                                     │   └── sample-agent-legacy.py       # Legacy pattern (backward compat)
-                                                                     ├── scripts/
-                                                                     │   ├── setup-gateway.sh             # One-command setup
-                                                                     │   └── generate-virtual-key.sh      # Virtual key generation
-                                                                     ├── k8s/
-                                                                     │   ├── gateway-deployment.yaml      # Kubernetes deployment
-                                                                     │   └── secrets.yaml                 # Kubernetes secrets
-                                                                     ├── Makefile                         # Build automation
-                                                                     ├── .env.gateway.example             # Environment template
-                                                                     └── README.md                        # This file
-                                                                     ```
-
-                                                                     ## Architecture
-
-                                                                     ### Current State (Legacy)
-                                                                     ```
-                                                                     Agent (Hardcoded API Key) → Provider API → LLM
-                                                                     ```
-
-                                                                     ### Target State (Gateway)
-                                                                     ```
-                                                                     Agent (Virtual Key) → LLM Gateway → Provider API → LLM
-                                                                     ```
-
-                                                                     **Benefits:**
-                                                                     - No hardcoded API keys in agent code
-                                                                     - Centralized cost tracking
-                                                                     - Team-based access control
-                                                                     - Easy provider switching
-                                                                     - Request caching and rate limiting
-                                                                     - Full observability
-
-                                                                     ## Gateway Selection
-
-                                                                     ### LiteLLM Proxy (Recommended)
-
-                                                                     **Pros:**
-                                                                     - Open-source with active community
-                                                                     - 100+ provider support
-                                                                     - Built-in virtual keys and cost tracking
-                                                                     - Self-hosted for full control
-                                                                     - OpenTelemetry support
-
-                                                                     **Cons:**
-                                                                     - Requires infrastructure management
-                                                                     - Learning curve for advanced features
-
-                                                                     ### Portkey (Alternative)
-
-                                                                     **Pros:**
-                                                                     - Managed service option
-                                                                     - Excellent developer experience
-                                                                     - Built-in prompt management
-
-                                                                     **Cons:**
-                                                                     - Vendor lock-in
-                                                                     - Less provider flexibility
-                                                                     - Self-hosted option less mature
-
-                                                                     ## Make Commands
-
-                                                                     ```bash
-                                                                     # Gateway Management
-                                                                     make start-gateway          # Start gateway and dependencies
-                                                                     make stop-gateway           # Stop gateway
-                                                                     make restart-gateway        # Restart gateway
-                                                                     make gateway-logs           # View gateway logs
-                                                                     make gateway-status         # Check gateway status
-
-                                                                     # Initialization
-                                                                     make init-gateway           # Initialize gateway (first time)
-
-                                                                     # Virtual Keys
-                                                                     make generate-key team=myteam models="gpt-4"  # Generate virtual key
-                                                                     make list-keys              # List all virtual keys
-                                                                     make delete-key key=<key>   # Delete a virtual key
-
-                                                                     # Testing
-                                                                     make test-agent-gateway     # Test new gateway agent
-                                                                     make test-agent-legacy      # Test legacy agent
-                                                                     make test-integration       # Run integration tests
-
-                                                                     # Kubernetes
-                                                                     make k8s-deploy             # Deploy to Kubernetes
-                                                                     make k8s-delete             # Delete K8s deployment
-                                                                     make k8s-logs               # View K8s logs
-
-                                                                     # Cleanup
-                                                                     make clean                  # Clean up all resources
-                                                                     ```
-
-                                                                     ## Configuration
-
-                                                                     ### Environment Variables
-
-                                                                     Create `.env.gateway`:
-
-                                                                     ```bash
-                                                                     # Provider API Keys (stored only in gateway)
-                                                                     OPENAI_API_KEY=sk-your-openai-key
-                                                                     ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
-
-                                                                     # Gateway Configuration
-                                                                     LITELLM_MASTER_KEY=sk-litellm-master-random-string
-
-                                                                     # Database
-                                                                     POSTGRES_PASSWORD=secure-password
-                                                                     DATABASE_URL=postgresql://litellm:secure-password@postgres:5432/litellm
-
-                                                                     # Agent Configuration (set after generating virtual key)
-                                                                     GATEWAY_URL=http://localhost:4000
-                                                                     GATEWAY_VIRTUAL_KEY=sk-litellm-v1-virtual-key
-                                                                     ```
+LiteLLM runs inside the same Docker network as Nasiko agents — no outbound SaaS dependency.
 
-                                                                     ### Gateway Config
+### Virtual Key Security
 
-                                                                     Edit `config/gateway-config.yaml` to:
-                                                                     - Add/remove models
-                                                                     - Configure rate limits
-                                                                     - Set budgets
-                                                                     - Enable caching
+Real provider credentials (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, etc.) are:
+- Stored only in the gateway container's environment (`.env` file, never committed)
+- Never exposed to agents or agent source code
+- Per-key budgets and rate limits enforced at gateway level
 
-                                                                     ## Agent Migration
+### Backward Compatibility
 
-                                                                     ### From Legacy (Direct Keys)
+Legacy agents using `OPENAI_API_KEY` directly continue working without modification. The gateway adds a new pattern; it does not replace or break the existing one.
 
-                                                                     **Before:**
-                                                                     ```python
-                                                                     import os
-                                                                     from openai import OpenAI
+---
 
-                                                                     client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-                                                                     response = client.chat.completions.create(
-                                                                         model="gpt-4",
-                                                                             messages=[...]
-                                                                             )
-                                                                             ```
+## Provider Configuration
 
-                                                                             **After:**
-                                                                             ```python
-                                                                             import os
-                                                                             from base_gateway_client import create_client
+Providers are defined in `config/gateway-config.yaml`:
 
-                                                                             client = create_client()
-                                                                             response = client.chat.completions.create(
-                                                                                 model="gpt-4",
-                                                                                     messages=[...]
-                                                                                     )
-                                                                                     ```
+```yaml
+model_list:
+  - model_name: gemini-flash       # alias agents use
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: "os.environ/GEMINI_API_KEY"   # real key — only in gateway env
+      rpm: 1000
+      tpm: 1000000
 
-                                                                                     **Environment:**
-                                                                                     ```bash
-                                                                                     # Before
-                                                                                     export OPENAI_API_KEY='sk-...'
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: "os.environ/OPENAI_API_KEY"
+```
 
-                                                                                     # After
-                                                                                     export GATEWAY_URL='http://localhost:4000'
-                                                                                     export GATEWAY_VIRTUAL_KEY='sk-litellm-...'
-                                                                                     ```
+To add a new provider: add a stanza, set the env var in `.env`, restart. **No agent changes required.**
 
-                                                                                     ## Security Best Practices
+---
 
-                                                                                     1. **Never commit API keys**
-                                                                                        - `.env.gateway` is in `.gitignore`
-                                                                                           - Use virtual keys for agents
+## Multi-Provider Cost Guide
 
-                                                                                           2. **Use separate virtual keys per team**
-                                                                                              - Budget isolation
-                                                                                                 - Model access control
-                                                                                                    - Audit trail
+| Provider | Model | Approx cost | Best for |
+|---|---|---|---|
+| Google Gemini | gemini-1.5-flash | Free (rate limited) | Development, high volume |
+| Groq | llama3-8b | Free (fast inference) | Low latency tasks |
+| OpenAI | gpt-3.5-turbo | ~$0.001/1K tok | Cost-balanced production |
+| OpenAI | gpt-4o | ~$0.005/1K tok | Complex reasoning |
+| Anthropic | claude-3-haiku | ~$0.00025/1K tok | Fast, cost-efficient |
+| Anthropic | claude-3-5-sonnet | ~$0.003/1K tok | Long context, coding |
 
-                                                                                                    3. **Rotate keys regularly**
-                                                                                                       ```bash
-                                                                                                          # Generate new key
-                                                                                                             make generate-key team=myteam
-                                                                                                                
-                                                                                                                   # Update agents
-                                                                                                                      # Delete old key
-                                                                                                                         make delete-key key=old-key
-                                                                                                                            ```
+Switching from GPT-4o to Gemini Flash for a 10M token/month workload: **~$50k/month → $0**.
 
-                                                                                                                            4. **Monitor usage**
-                                                                                                                               - Gateway UI: http://localhost:4000/ui
-                                                                                                                                  - Check logs: `make gateway-logs`
+---
 
-                                                                                                                                  ## Testing
+## Observability
 
-                                                                                                                                  ### Unit Tests
+Requests are traced via **OpenTelemetry** → [Arize Phoenix](https://phoenix.arize.com/):
 
-                                                                                                                                  ```bash
-                                                                                                                                  # Test gateway connectivity
-                                                                                                                                  python -m pytest tests/test_gateway.py -v
+```yaml
+litellm_settings:
+  success_callback: ["arize_phoenix"]
+  failure_callback: ["arize_phoenix"]
+```
 
-                                                                                                                                  # Test agent integration
-                                                                                                                                  python -m pytest tests/test_agent_integration.py -v
-                                                                                                                                  ```
+Each request produces correlated spans at both the agent call layer and the gateway routing layer, giving end-to-end latency visibility per provider.
 
-                                                                                                                                  ### Integration Tests
+---
 
-                                                                                                                                  ```bash
-                                                                                                                                  make test-integration
-                                                                                                                                  ```
+## Acceptance Criteria
 
-                                                                                                                                  ### Load Tests
+| Criterion | Status |
+|---|---|
+| Gateway auto-deploys via `make start-nasiko` | ✅ |
+| Sample agent completes LLM call without provider key in source | ✅ |
+| Changing provider = gateway-config only, no agent code change | ✅ |
+| Existing agents keep working without modification | ✅ |
+| Docs warn against hardcoding model keys | ✅ |
+| LiteLLM choice documented with trade-off rationale | ✅ |
 
-                                                                                                                                  ```bash
-                                                                                                                                  make test-load
-                                                                                                                                  ```
+---
 
-                                                                                                                                  ## Troubleshooting
+## Makefile Reference
 
-                                                                                                                                  ### Gateway won't start
+```bash
+make start-gateway       # Start LiteLLM + Postgres + Redis
+make stop-gateway        # Stop gateway containers
+make restart-gateway     # Restart (picks up config changes)
+make generate-key team=X # Create virtual key for team X
+make start-nasiko        # Start full Nasiko stack + gateway
+make logs-gateway        # Tail gateway logs
+make test-agents         # Run integration tests for both agent patterns
+```
 
-                                                                                                                                  1. Check Docker is running
-                                                                                                                                  2. Verify `.env.gateway` exists and is populated
-                                                                                                                                  3. Check logs: `make gateway-logs`
-                                                                                                                                  4. Ensure ports 4000, 5432 are available
+---
 
-                                                                                                                                  ### Virtual key doesn't work
+## Environment Variables
 
-                                                                                                                                  1. Verify gateway is running: `make gateway-status`
-                                                                                                                                  2. Check key exists: `make list-keys`
-                                                                                                                                  3. Ensure `GATEWAY_VIRTUAL_KEY` is set correctly
-                                                                                                                                  4. Verify key hasn't expired
+Create a `.env` file (never commit this):
 
-                                                                                                                                  ### Agent can't connect
+```env
+LITELLM_MASTER_KEY=sk-master-your-secret
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=AI...
+GROQ_API_KEY=gsk_...
+```
 
-                                                                                                                                  1. Check `GATEWAY_URL` environment variable
-                                                                                                                                  2. Ensure gateway is healthy: `curl http://localhost:4000/health`
-                                                                                                                                  3. Check network connectivity
-                                                                                                                                  4. Verify virtual key has access to requested model
+Agents only need:
+```env
+GATEWAY_URL=http://localhost:4000
+GATEWAY_VIRTUAL_KEY=sk-litellm-v1-generated-key
+```
 
-                                                                                                                                  ## Documentation
+---
 
-                                                                                                                                  - [Architecture Overview](docs/ARCHITECTURE.md)
-                                                                                                                                  - [Migration Guide](docs/MIGRATION.md)
-                                                                                                                                  - [API Reference](docs/API.md)
-                                                                                                                                  - [Troubleshooting](docs/TROUBLESHOOTING.md)
+## Security Notes
 
-                                                                                                                                  ## Acceptance Criteria
+> ⚠️ **Never hardcode provider API keys in agent code or commit them to source control.**
 
-                                                                                                                                  - [x] Gateway auto-deploys through `make start-nasiko`
-                                                                                                                                  - [x] Sample agent completes LLM call without provider key in source
-                                                                                                                                  - [x] Changing provider is gateway-config only with no agent code change
-                                                                                                                                  - [x] Existing agents keep working without modification
-                                                                                                                                  - [x] Documentation warns against hardcoding model keys
-                                                                                                                                  - [x] Provider credentials managed centrally in gateway config/secrets
-                                                                                                                                  - [x] Choice of LiteLLM documented with trade-off rationale
+The gateway pattern enforces this structurally: agents are issued virtual keys that carry no provider credentials. Real keys live only in the gateway container environment, isolated from agent source trees. Virtual keys can be rotated, budget-capped, and revoked without touching agent code.
 
-                                                                                                                                  ## Contributing
+---
 
-                                                                                                                                  1. Fork the repository
-                                                                                                                                  2. Create a feature branch
-                                                                                                                                  3. Make changes
-                                                                                                                                  4. Run tests: `make test-integration`
-                                                                                                                                  5. Submit a pull request
+## Tech Stack
 
-                                                                                                                                  ## License
+- **[LiteLLM Proxy](https://docs.litellm.ai/)** — multi-provider LLM gateway
+- **Docker + Docker Compose** — containerized gateway stack
+- **FastAPI** — Nasiko-compliant agent server (`nasiko-agent/src/main.py`)
+- **PostgreSQL + Redis** — virtual key storage and caching
+- **OpenTelemetry + Arize Phoenix** — distributed tracing
+- **Python 3.11** — agent runtime
 
-                                                                                                                                  MIT License - See LICENSE file for details
+---
 
-                                                                                                                                  ## Support
+## Team Bible Black
 
-                                                                                                                                  - GitHub Issues: Report bugs and feature requests
-                                                                                                                                  - Documentation: Check `/docs` directory
-                                                                                                                                  - Gateway UI: http://localhost:4000/ui (when running)
+Built for **Nasiko Labs Hackathon — Track 2: LLM Router Gateway Integration**
